@@ -13,8 +13,7 @@ static const char *TAG = "led_mgr";
 static volatile uint8_t led_r = 200;
 static volatile uint8_t led_g = 150;
 static volatile uint8_t led_b = 16;
-static volatile uint32_t blink_period = 1000; // ms
-static volatile uint8_t blink_enabled = 1;
+static volatile uint8_t led_on = 0;
 
 static led_strip_handle_t led_strip = NULL;
 
@@ -43,29 +42,21 @@ static void led_control_task(void *pvParameters)
     configure_led();
     
     while (1) {
-        if (blink_enabled) {
+        if (led_on) {
 #ifdef CONFIG_BLINK_LED_RMT
             led_strip_set_pixel(led_strip, 0, led_r, led_g, led_b);
             led_strip_refresh(led_strip);
 #elif CONFIG_BLINK_LED_GPIO
             gpio_set_level(BLINK_GPIO, 1);
 #endif
-            vTaskDelay(pdMS_TO_TICKS(blink_period / 2));
-            
-#ifdef CONFIG_BLINK_LED_RMT
-            led_strip_clear(led_strip);
-#elif CONFIG_BLINK_LED_GPIO
-            gpio_set_level(BLINK_GPIO, 0);
-#endif
-            vTaskDelay(pdMS_TO_TICKS(blink_period / 2));
         } else {
 #ifdef CONFIG_BLINK_LED_RMT
             led_strip_clear(led_strip);
 #elif CONFIG_BLINK_LED_GPIO
             gpio_set_level(BLINK_GPIO, 0);
 #endif
-            vTaskDelay(pdMS_TO_TICKS(100));
         }
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -76,7 +67,7 @@ void led_mgr_init(void)
 
 void led_mgr_set_state(uint8_t state)
 {
-    blink_enabled = state;
+    led_on = state;
 }
 
 void led_mgr_set_color(uint8_t r, uint8_t g, uint8_t b)
@@ -88,12 +79,12 @@ void led_mgr_set_color(uint8_t r, uint8_t g, uint8_t b)
 
 void led_mgr_set_blink_period(uint32_t period)
 {
-    blink_period = period;
+    // 不再使用闪烁功能，保留接口兼容性
 }
 
 bool led_mgr_get_state(void)
 {
-    return blink_enabled != 0;
+    return led_on != 0;
 }
 
 void led_mgr_get_color(uint8_t *r, uint8_t *g, uint8_t *b)
@@ -105,5 +96,5 @@ void led_mgr_get_color(uint8_t *r, uint8_t *g, uint8_t *b)
 
 uint32_t led_mgr_get_blink_period(void)
 {
-    return blink_period;
+    return 0;
 }
