@@ -37,7 +37,7 @@ static void serial_command_task(void *pvParameters)
     printf("\n>");
     fflush(stdout);
     
-    uint8_t* data = (uint8_t*) malloc(1024);
+    uint8_t data[1024];
     char cmd_buffer[64];
     int cmd_index = 0;
     
@@ -100,8 +100,6 @@ static void serial_command_task(void *pvParameters)
             }
         }
     }
-    
-    free(data);
 }
 
 void serial_cmd_init(void)
