@@ -128,15 +128,24 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+// 清理 STA 模式申请的所有 Wi-Fi 资源，使 AP 模式可以安全地重新初始化
+static void wifi_sta_cleanup(void)
+{
+    esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler);
+    esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler);
+    esp_wifi_stop();
+    esp_wifi_deinit();
+    ESP_LOGI(TAG, "STA 资源已释放");
+}
+
 static void wifi_monitor_task(void *pvParameters)
 {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(2000));
         
         if (!wifi_connected && strlen(saved_ssid) > 0 && s_retry_num >= MAX_RETRY_COUNT) {
-            ESP_LOGI(TAG, "Wi-Fi连接失败，准备切换到AP模式...");
-            esp_wifi_stop();
-            ESP_LOGI(TAG, "重启进入AP模式...");
+            ESP_LOGI(TAG, "Wi-Fi连接失败，准备切换到AP模式，重启...");
+            wifi_sta_cleanup();
             esp_restart();
         }
     }
@@ -225,7 +234,6 @@ void wifi_mgr_start_sta(void)
         
         if (s_retry_num >= MAX_RETRY_COUNT) {
             ESP_LOGI(TAG, "连接失败次数过多 (%d/%d)，准备切换到AP模式", s_retry_num, MAX_RETRY_COUNT);
-            esp_wifi_stop();
             wifi_connected = 0;
             wifi_connecting = 0;
             break;
@@ -234,13 +242,16 @@ void wifi_mgr_start_sta(void)
     
     if (wait_count >= max_wait) {
         ESP_LOGI(TAG, "连接超时，准备切换到AP模式");
-        esp_wifi_stop();
         wifi_connected = 0;
         wifi_connecting = 0;
     }
     
-    if (!wifi_connected && strlen(saved_ssid) > 0) {
-        ESP_LOGI(TAG, "清除保存的Wi-Fi配置");
-        wifi_mgr_clear_config();
+    // STA 连接最终失败：释放资源，让 AP 模式可以干净地调用 esp_wifi_init()
+    if (!wifi_connected) {
+        wifi_sta_cleanup();
+        if (strlen(saved_ssid) > 0) {
+            ESP_LOGI(TAG, "清除保存的Wi-Fi配置");
+            wifi_mgr_clear_config();
+        }
     }
 }
