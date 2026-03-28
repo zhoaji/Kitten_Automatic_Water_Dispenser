@@ -12,6 +12,7 @@
 #include "wifi_mgr.h"
 #include "led_mgr.h"
 #include "motor_mgr.h"
+#include "power_mgr.h"
 
 static const char *TAG = "web_server";
 static httpd_handle_t http_server = NULL;
@@ -318,6 +319,66 @@ static const char *index_html =
     "input:checked + .toggle-slider:before {"
     "  transform: translateX(26px);"
     "}"
+    ".power-card {"
+    "  background: #fff;"
+    "  border: 2px solid #e0e0e0;"
+    "  border-radius: 16px;"
+    "  padding: 20px 25px;"
+    "  margin-bottom: 20px;"
+    "  display: flex;"
+    "  align-items: center;"
+    "  justify-content: space-between;"
+    "}"
+    ".power-card-label {"
+    "  display: flex;"
+    "  align-items: center;"
+    "  gap: 10px;"
+    "}"
+    ".power-card-label h2 {"
+    "  color: #333;"
+    "  font-size: 17px;"
+    "  margin: 0;"
+    "}"
+    ".power-card-label .power-icon {"
+    "  font-size: 28px;"
+    "}"
+    ".power-status-text {"
+    "  font-size: 12px;"
+    "  color: #888;"
+    "  margin-top: 4px;"
+    "}"
+    ".power-btn {"
+    "  padding: 12px 22px;"
+    "  border: none;"
+    "  border-radius: 12px;"
+    "  font-size: 14px;"
+    "  font-weight: bold;"
+    "  cursor: pointer;"
+    "  transition: all 0.3s;"
+    "  white-space: nowrap;"
+    "}"
+    ".power-btn.power-off {"
+    "  background: linear-gradient(135deg, #ff5252, #c62828);"
+    "  color: white;"
+    "  box-shadow: 0 4px 12px rgba(255,82,82,0.4);"
+    "}"
+    ".power-btn.power-on {"
+    "  background: linear-gradient(135deg, #43e97b, #38f9d7);"
+    "  color: #1a5c3a;"
+    "  box-shadow: 0 4px 12px rgba(67,233,123,0.4);"
+    "}"
+    ".power-btn:hover { transform: translateY(-2px); opacity: 0.9; }"
+    ".sleeping-overlay {"
+    "  display: none;"
+    "  background: rgba(255,255,255,0.92);"
+    "  border-radius: 12px;"
+    "  padding: 20px;"
+    "  text-align: center;"
+    "  margin-bottom: 20px;"
+    "  border: 2px dashed #ccc;"
+    "}"
+    ".sleeping-overlay span { font-size: 40px; display: block; margin-bottom: 8px; }"
+    ".sleeping-overlay p { color: #888; font-size: 14px; }"
     "</style>"
     "</head>"
     "<body>"
@@ -385,6 +446,16 @@ static const char *index_html =
     "      <div class=\"status-text\" id=\"wifiStatus\">正在连接...</div>"
     "      <button class=\"wifi-btn\" onclick=\"window.location.href='/config'\">📱 重新配置WiFi</button>"
     "    </div>"
+    "    <div class=\"power-card\" id=\"powerCard\">"
+    "      <div class=\"power-card-label\">"
+    "        <span class=\"power-icon\" id=\"powerIcon\">🟢</span>"
+    "        <div>"
+    "          <h2>设备电源</h2>"
+    "          <div class=\"power-status-text\" id=\"powerStatusText\">正常运行中</div>"
+    "        </div>"
+    "      </div>"
+    "      <button class=\"power-btn power-off\" id=\"powerBtn\" onclick=\"powerControl()\">⏻ 关机</button>"
+    "    </div>"
     "  </div>"
     "  <div class=\"footer\">"
     "    ESP32-S3 猫咪出水机 v1.0"
@@ -396,6 +467,50 @@ static const char *index_html =
     "  toast.textContent = msg;"
     "  toast.classList.add('show');"
     "  setTimeout(function() { toast.classList.remove('show'); }, 2000);"
+    "}"
+    "var isSleeping = false;"
+    "function powerControl() {"
+    "  var action = isSleeping ? 'wakeup' : 'shutdown';"
+    "  var confirmMsg = isSleeping ? '确定要开机吗？' : '确定要关机？设备将进入低功耗休眠状态。';"
+    "  if (!confirm(confirmMsg)) return;"
+    "  var xhr = new XMLHttpRequest();"
+    "  xhr.open('POST', '/power', true);"
+    "  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');"
+    "  xhr.onreadystatechange = function() {"
+    "    if (xhr.readyState == 4 && xhr.status == 200) {"
+    "      if (action === 'shutdown') {"
+    "        showToast('😴 设备已进入休眠模式');"
+    "        updatePowerUI(true);"
+    "      } else {"
+    "        showToast('✅ 设备已唤醒，正常运行中');"
+    "        updatePowerUI(false);"
+    "      }"
+    "    }"
+    "  };"
+    "  xhr.send('action=' + action);"
+    "}"
+    "function updatePowerUI(sleeping) {"
+    "  isSleeping = sleeping;"
+    "  var powerBtn = document.getElementById('powerBtn');"
+    "  var powerIcon = document.getElementById('powerIcon');"
+    "  var powerStatusText = document.getElementById('powerStatusText');"
+    "  var statusIcon = document.getElementById('statusIcon');"
+    "  var statusText = document.getElementById('statusText');"
+    "  var statusDetail = document.getElementById('statusDetail');"
+    "  if (sleeping) {"
+    "    powerBtn.textContent = '⏻ 开机';"
+    "    powerBtn.className = 'power-btn power-on';"
+    "    powerIcon.textContent = '🔴';"
+    "    powerStatusText.textContent = '低功耗休眠中';"
+    "    statusIcon.textContent = '😴';"
+    "    statusText.textContent = '设备已休眠';"
+    "    statusDetail.textContent = '电机已停止，LED已关闭，WiFi保持连接';"
+    "  } else {"
+    "    powerBtn.textContent = '⏻ 关机';"
+    "    powerBtn.className = 'power-btn power-off';"
+    "    powerIcon.textContent = '🟢';"
+    "    powerStatusText.textContent = '正常运行中';"
+    "  }"
     "}"
     "function toggleLed(checked) {"
     "  var xhr = new XMLHttpRequest();"
@@ -439,23 +554,27 @@ static const char *index_html =
     "        var statusIcon = document.getElementById('statusIcon');"
     "        var statusText = document.getElementById('statusText');"
     "        var statusDetail = document.getElementById('statusDetail');"
-    "        if (data.wifi_connected) {"
-    "          wifiStatus.innerHTML = '✅ 已连接: ' + data.ssid + '<br>📍 IP: ' + data.ip;"
-    "          statusIcon.textContent = '💧';"
-    "          statusText.textContent = '系统正常运行中';"
-    "          statusDetail.textContent = 'WiFi: ' + data.ssid + ' | IP: ' + data.ip;"
-    "        } else if (data.mode === 'AP') {"
-    "          wifiStatus.innerHTML = '📡 热点模式<br><a href=\"http://192.168.4.1/config\" style=\"color:#667eea;\">点击配置WiFi</a>';"
-    "          statusIcon.textContent = '📡';"
-    "          statusText.textContent = '待配置网络';"
-    "          statusDetail.textContent = '请连接WiFi进行配置';"
-    "        } else {"
-    "          wifiStatus.innerHTML = '🔄 连接中...';"
-    "          statusIcon.textContent = '⏳';"
-    "          statusText.textContent = '正在连接...';"
-    "          statusDetail.textContent = '请稍候...';"
+    "        var sleeping = !!data.sleeping;"
+    "        updatePowerUI(sleeping);"
+    "        if (!sleeping) {"
+    "          if (data.wifi_connected) {"
+    "            wifiStatus.innerHTML = '✅ 已连接: ' + data.ssid + '<br>📍 IP: ' + data.ip;"
+    "            statusIcon.textContent = '💧';"
+    "            statusText.textContent = '系统正常运行中';"
+    "            statusDetail.textContent = 'WiFi: ' + data.ssid + ' | IP: ' + data.ip;"
+    "          } else if (data.mode === 'AP') {"
+    "            wifiStatus.innerHTML = '📡 热点模式<br><a href=\"http://192.168.4.1/config\" style=\"color:#667eea;\">点击配置WiFi</a>';"
+    "            statusIcon.textContent = '📡';"
+    "            statusText.textContent = '待配置网络';"
+    "            statusDetail.textContent = '请连接WiFi进行配置';"
+    "          } else {"
+    "            wifiStatus.innerHTML = '🔄 连接中...';"
+    "            statusIcon.textContent = '⏳';"
+    "            statusText.textContent = '正在连接...';"
+    "            statusDetail.textContent = '请稍候...';"
+    "          }"
     "        }"
-        "        if (data.motor_duty !== undefined) {"
+    "        if (data.motor_duty !== undefined) {"
     "          document.getElementById('dutySlider').value = data.motor_duty;"
     "          document.getElementById('dutyValue').textContent = data.motor_duty + '%';"
     "        }"
@@ -746,6 +865,7 @@ static esp_err_t motor_speed_handler(httpd_req_t *req) {
         if (duty > 100) duty = 100;
         motor_mgr_set_duty(duty);
         current_motor_duty = duty;
+        power_mgr_set_saved_duty(duty);  // 同步保存供唤醒恢复
         
         // 根据流量更新LED颜色
         update_led_by_flow(duty);
@@ -781,7 +901,8 @@ static esp_err_t led_control_handler(httpd_req_t *req) {
 
 // 状态查询
 static esp_err_t status_handler(httpd_req_t *req) {
-    char status_json[400];
+    char status_json[450];
+    int sleeping = power_mgr_is_sleeping() ? 1 : 0;
     
     httpd_resp_set_hdr(req, "Cache-Control", "no-cache, no-store, must-revalidate");
     httpd_resp_set_hdr(req, "Pragma", "no-cache");
@@ -789,22 +910,53 @@ static esp_err_t status_handler(httpd_req_t *req) {
     
     if (wifi_mgr_is_connected()) {
         snprintf(status_json, sizeof(status_json),
-            "{\"wifi_connected\":true,\"mode\":\"STA\",\"ssid\":\"%s\",\"ip\":\"%s\",\"motor_duty\":%d,\"led_state\":%d}",
-            wifi_mgr_get_saved_ssid(), wifi_mgr_get_ip(), current_motor_duty, current_led_state);
+            "{\"wifi_connected\":true,\"mode\":\"STA\",\"ssid\":\"%s\",\"ip\":\"%s\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d}",
+            wifi_mgr_get_saved_ssid(), wifi_mgr_get_ip(), current_motor_duty, current_led_state, sleeping);
     } else {
         if (strlen(wifi_mgr_get_saved_ssid()) > 0) {
             snprintf(status_json, sizeof(status_json),
-                "{\"wifi_connected\":false,\"mode\":\"CONNECTING\",\"ssid\":\"%s\",\"ip\":\"\",\"motor_duty\":%d,\"led_state\":%d}",
-                wifi_mgr_get_saved_ssid(), current_motor_duty, current_led_state);
+                "{\"wifi_connected\":false,\"mode\":\"CONNECTING\",\"ssid\":\"%s\",\"ip\":\"\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d}",
+                wifi_mgr_get_saved_ssid(), current_motor_duty, current_led_state, sleeping);
         } else {
             snprintf(status_json, sizeof(status_json),
-                "{\"wifi_connected\":false,\"mode\":\"AP\",\"ssid\":\"ESP32-Cat\",\"ip\":\"192.168.4.1\",\"motor_duty\":%d,\"led_state\":%d}",
-                current_motor_duty, current_led_state);
+                "{\"wifi_connected\":false,\"mode\":\"AP\",\"ssid\":\"ESP32-Cat\",\"ip\":\"192.168.4.1\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d}",
+                current_motor_duty, current_led_state, sleeping);
         }
     }
     
     httpd_resp_set_type(req, "application/json");
     httpd_resp_send(req, status_json, strlen(status_json));
+    return ESP_OK;
+}
+
+// 电源控制（开机/关机）
+static esp_err_t power_control_handler(httpd_req_t *req) {
+    char content[64];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    content[ret] = '\0';
+    
+    char *p = strstr(content, "action=");
+    if (p) {
+        p += 7; // 跳过 "action="
+        if (strncmp(p, "shutdown", 8) == 0) {
+            ESP_LOGI(TAG, "收到关机命令");
+            power_mgr_shutdown();
+            current_motor_duty = 0;    // 同步UI显示状态
+            current_led_state = 0;
+            httpd_resp_send(req, "{\"status\":\"ok\",\"action\":\"shutdown\"}", -1);
+        } else if (strncmp(p, "wakeup", 6) == 0) {
+            ESP_LOGI(TAG, "收到开机命令");
+            power_mgr_wakeup();
+            current_motor_duty = power_mgr_get_saved_duty(); // 恢复UI显示状态
+            current_led_state = 1;
+            httpd_resp_send(req, "{\"status\":\"ok\",\"action\":\"wakeup\"}", -1);
+        } else {
+            httpd_resp_send(req, "{\"status\":\"error\",\"msg\":\"unknown action\"}", -1);
+        }
+    } else {
+        httpd_resp_send(req, "{\"status\":\"error\",\"msg\":\"missing action\"}", -1);
+    }
     return ESP_OK;
 }
 
@@ -816,6 +968,7 @@ static const httpd_uri_t uri_reset_wifi = { .uri = "/reset_wifi", .method = HTTP
 static const httpd_uri_t uri_motor_speed = { .uri = "/motor_speed", .method = HTTP_POST, .handler = motor_speed_handler };
 static const httpd_uri_t uri_led_control = { .uri = "/led_control", .method = HTTP_POST, .handler = led_control_handler };
 static const httpd_uri_t uri_status = { .uri = "/status", .method = HTTP_GET, .handler = status_handler };
+static const httpd_uri_t uri_power = { .uri = "/power", .method = HTTP_POST, .handler = power_control_handler };
 
 // 启动Web服务器
 esp_err_t start_web_server(void)
@@ -831,6 +984,7 @@ esp_err_t start_web_server(void)
         httpd_register_uri_handler(http_server, &uri_motor_speed);
         httpd_register_uri_handler(http_server, &uri_led_control);
         httpd_register_uri_handler(http_server, &uri_status);
+        httpd_register_uri_handler(http_server, &uri_power);
         
         // 初始化LED颜色
         update_led_by_flow(current_motor_duty);

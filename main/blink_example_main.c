@@ -9,6 +9,7 @@
 #include "web_server.h"
 #include "serial_cmd.h"
 #include "motor_mgr.h"
+#include "power_mgr.h"
 
 static const char *TAG = "main";
 
@@ -29,6 +30,7 @@ void app_main(void)
     motor_mgr_init();
     serial_cmd_init();
     wifi_mgr_init();
+    power_mgr_init();
     
     // Check if we have Wi-Fi config
     if (strlen(wifi_mgr_get_saved_ssid()) > 0) {
