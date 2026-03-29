@@ -325,7 +325,7 @@ static const char *index_html =
     "        <button class=\"preset-btn low\" onclick=\"setDuty(25)\">💧 小流</button>"
     "        <button class=\"preset-btn medium\" onclick=\"setDuty(50)\">💦 中流</button>"
     "        <button class=\"preset-btn high\" onclick=\"setDuty(75)\">🌊 大流</button>"
-    "        <button class=\"preset-btn medium\" onclick=\"setDuty(60)\">⛽ 75%</button>"
+    "        <button class=\"preset-btn high\" onclick=\"setDuty(88)\">⚡ 88%</button>"
     "        <button class=\"preset-btn high\" onclick=\"setDuty(100)\">💯 全开</button>"
     "      </div>"
     "    </div>"
