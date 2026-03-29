@@ -7,7 +7,7 @@
 #define MOTOR_PWM_OUTPUT_IO     (4)
 #define MOTOR_PWM_CHANNEL       LEDC_CHANNEL_0
 #define MOTOR_PWM_DUTY_RES      LEDC_TIMER_10_BIT
-#define MOTOR_PWM_FREQUENCY     (25000)
+#define MOTOR_PWM_FREQUENCY     (30000)
 
 static const char *TAG = "motor_mgr";
 
@@ -42,28 +42,61 @@ esp_err_t motor_mgr_set_duty(uint32_t duty_percent)
     if (duty_percent > 100) {
         duty_percent = 100;
     }
-    
-    // 你的电机：占空比越低转速越快，所以反转关系
-    // 用户界面 0% -> 实际占空比 100% (最快)
-    // 用户界面 100% -> 实际占空比 0% (最慢/停止)
-    uint32_t actual_duty = 100 - duty_percent;
-    
-    // 限制最大占空比为90%（超过90%电机停止）
-    if (actual_duty > 90) {
-        actual_duty = 90;
+
+    if (duty_percent == 0) {
+        // 停止：ledc_stop 强制 GPIO 输出高电平（idle_level=1）
+        // 该电机驱动为高电平停止：GPIO HIGH → 电机停止，GPIO LOW/PWM → 电机运行
+        ledc_stop(MOTOR_PWM_MODE, MOTOR_PWM_CHANNEL, 1);
+        ESP_LOGI(TAG, "UI: 0%% -> Motor STOPPED (GPIO HIGH)");
+        return ESP_OK;
     }
-    
-    // 最小占空比设为5%，避免完全停止
-    if (actual_duty < 5) {
-        actual_duty = 5;
-    }
-    
-    // 10-bit resolution -> max duty is 1023
-    uint32_t duty = (actual_duty * 1023) / 100;
-    
+
+    // ── 根据 PWM 调速流量曲线图（20kHz 参考，本机 15kHz 近似适用）──
+    //
+    //  占空比(%) │ 流量(L/min)
+    //  ──────────┼────────────
+    //    30%     │  ~1.08   ← 最大流量
+    //    45%     │  ~0.84
+    //    60%     │  ~0.62
+    //    75%     │  ~0.20
+    //    88%     │  ~0.02   ← 刚好能转动
+    //    90%+    │   0      ← 电机停止
+    //    <30%    │  未定义   ← 避免进入此区间
+    //
+    // UI 映射（反向线性）：
+    //   UI   1% → PWM  88%（最小流量，刚好启动）
+    //   UI  50% → PWM ~59%（中等流量）
+    //   UI 100% → PWM  30%（最大流量 ~1.08 L/min）
+    //
+    // 公式：pwm = 88 - (duty_percent - 1) * 58 / 99
+
+    uint32_t pwm_percent = 88 - ((duty_percent - 1) * 58) / 99;
+
+    // 安全边界（理论上公式已保证，但防止整数溢出）
+    if (pwm_percent < 30) pwm_percent = 30;
+    if (pwm_percent > 88) pwm_percent = 88;
+
+    // 10-bit resolution -> 满量程 1023
+    uint32_t duty = (pwm_percent * 1023) / 100;
+
+    // 重新绑定 GPIO 到 LEDC 通道，模拟复位后的启动序列
+    ledc_channel_config_t ledc_channel = {
+        .speed_mode     = MOTOR_PWM_MODE,
+        .channel        = MOTOR_PWM_CHANNEL,
+        .timer_sel      = MOTOR_PWM_TIMER,
+        .intr_type      = LEDC_INTR_DISABLE,
+        .gpio_num       = MOTOR_PWM_OUTPUT_IO,
+        .duty           = duty,
+        .hpoint         = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
+
     ESP_ERROR_CHECK(ledc_set_duty(MOTOR_PWM_MODE, MOTOR_PWM_CHANNEL, duty));
     ESP_ERROR_CHECK(ledc_update_duty(MOTOR_PWM_MODE, MOTOR_PWM_CHANNEL));
-    
-    ESP_LOGI(TAG, "UI: %lu%% -> Actual duty: %lu%% (PWM: %lu)", duty_percent, actual_duty, duty);
+
+    ESP_LOGI(TAG, "UI: %lu%% -> PWM: %lu%% (reg: %lu)", duty_percent, pwm_percent, duty);
     return ESP_OK;
 }
+
+
+
