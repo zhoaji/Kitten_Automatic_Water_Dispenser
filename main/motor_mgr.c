@@ -1,5 +1,6 @@
 #include "motor_mgr.h"
 #include "driver/ledc.h"
+#include "driver/gpio.h"
 #include "esp_log.h"
 
 #define MOTOR_PWM_TIMER         LEDC_TIMER_0
@@ -13,6 +14,20 @@ static const char *TAG = "motor_mgr";
 
 esp_err_t motor_mgr_init(void)
 {
+    // ── 第一步：上电复位时先用 GPIO 驱动拉高引脚 ──
+    // LEDC 初始化前 GPIO 默认为输入浮空，可能导致电机意外启动
+    // 先强制输出高电平（高电平 = 电机停止）
+    gpio_config_t io_conf = {
+        .pin_bit_mask  = (1ULL << MOTOR_PWM_OUTPUT_IO),
+        .mode          = GPIO_MODE_OUTPUT,
+        .pull_up_en    = GPIO_PULLUP_DISABLE,
+        .pull_down_en  = GPIO_PULLDOWN_DISABLE,
+        .intr_type     = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io_conf);
+    gpio_set_level(MOTOR_PWM_OUTPUT_IO, 1);  // HIGH → 电机停止
+
+    // ── 第二步：初始化 LEDC 定时器 ──
     ledc_timer_config_t ledc_timer = {
         .speed_mode       = MOTOR_PWM_MODE,
         .timer_num        = MOTOR_PWM_TIMER,
@@ -22,6 +37,7 @@ esp_err_t motor_mgr_init(void)
     };
     ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
 
+    // ── 第三步：初始化 LEDC 通道（LEDC 接管 GPIO）──
     ledc_channel_config_t ledc_channel = {
         .speed_mode     = MOTOR_PWM_MODE,
         .channel        = MOTOR_PWM_CHANNEL,
@@ -33,7 +49,12 @@ esp_err_t motor_mgr_init(void)
     };
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 
-    ESP_LOGI(TAG, "Motor PWM initialized on GPIO %d at %d Hz", MOTOR_PWM_OUTPUT_IO, MOTOR_PWM_FREQUENCY);
+    // ── 第四步：LEDC 接管后立即停止输出，保持 GPIO 高电平 ──
+    // ledc_stop(idle_level=1) 强制 GPIO 输出高电平，电机保持停止
+    ledc_stop(MOTOR_PWM_MODE, MOTOR_PWM_CHANNEL, 1);
+
+    ESP_LOGI(TAG, "Motor PWM initialized on GPIO %d at %d Hz, startup safe (GPIO HIGH)",
+             MOTOR_PWM_OUTPUT_IO, MOTOR_PWM_FREQUENCY);
     return ESP_OK;
 }
 

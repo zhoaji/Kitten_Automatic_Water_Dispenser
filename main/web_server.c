@@ -8,6 +8,8 @@
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #include "wifi_mgr.h"
 #include "led_mgr.h"
@@ -16,8 +18,62 @@
 
 static const char *TAG = "web_server";
 static httpd_handle_t http_server = NULL;
-static int current_motor_duty = 50; // 默认50%
+static int current_motor_duty = 0;  // 默认0% - 上电时电机停止
 static int current_led_state = 1;   // 默认LED开启
+
+// 新增：自动停机相关变量
+static int current_auto_stop_sec = 0; // 0 表示关闭，存入 NVS
+static uint32_t last_activity_tick = 0;
+static TaskHandle_t auto_stop_task_handle = NULL;
+static const char *NVS_NAMESPACE = "cat_water";
+static const char *NVS_KEY_AUTOSTOP = "auto_stop_sec";
+
+static void update_led_by_flow(int duty);
+
+static void record_activity() {
+    last_activity_tick = xTaskGetTickCount();
+}
+
+static void load_auto_stop_cfg() {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &my_handle);
+    if (err == ESP_OK) {
+        int32_t val = 0;
+        err = nvs_get_i32(my_handle, NVS_KEY_AUTOSTOP, &val);
+        if (err == ESP_OK) {
+            current_auto_stop_sec = (int)val;
+        }
+        nvs_close(my_handle);
+    }
+}
+
+static void save_auto_stop_cfg(int sec) {
+    nvs_handle_t my_handle;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &my_handle);
+    if (err == ESP_OK) {
+        nvs_set_i32(my_handle, NVS_KEY_AUTOSTOP, (int32_t)sec);
+        nvs_commit(my_handle);
+        nvs_close(my_handle);
+    }
+}
+
+// 自动停机检查任务
+static void auto_stop_task(void *pvParameters) {
+    while (1) {
+        if (current_auto_stop_sec > 0 && current_motor_duty > 0) {
+            uint32_t current_tick = xTaskGetTickCount();
+            uint32_t elapsed_ms = (current_tick - last_activity_tick) * portTICK_PERIOD_MS;
+            if (elapsed_ms >= (uint32_t)current_auto_stop_sec * 1000) {
+                ESP_LOGI(TAG, "Auto stop triggered after %d seconds of inactivity", current_auto_stop_sec);
+                current_motor_duty = 0;
+                motor_mgr_set_duty(0);
+                power_mgr_set_saved_duty(0);
+                update_led_by_flow(0);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
 
 // 根据流量计算LED颜色 (流量0-100% -> 绿色到红色)
 static void update_led_by_flow(int duty)
@@ -285,6 +341,19 @@ static const char *index_html =
     "        </div>"
     "        <button class=\"wifi-btn\" onclick=\"window.location.href='/config'\">🔄 重新配置</button>"
     "      </div>"
+    "      <div class=\"setting-row\" style=\"flex-direction: column; align-items: stretch; border-bottom: none; padding-top: 0;\">"
+    "        <div class=\"setting-label\" style=\"margin-bottom: 15px; width: 100%; display: flex; align-items: center; justify-content: space-between;\">"
+    "          <div style=\"display: flex; align-items: center; gap: 12px;\">"
+    "            <span class=\"setting-label-icon\">⏳</span>"
+    "            <div>"
+    "              <div class=\"setting-label-name\">自动停机</div>"
+    "              <div class=\"setting-label-sub\">无操作多久后关水泵</div>"
+    "            </div>"
+    "          </div>"
+    "          <span id=\"autoStopText\" style=\"font-weight:bold; color:#667eea; font-size:15px;\">关闭</span>"
+    "        </div>"
+    "        <input type=\"range\" id=\"autoStopSlider\" min=\"0\" max=\"300\" step=\"20\" value=\"0\" oninput=\"updateAutoStopUI(this.value)\" onchange=\"setAutoStop(this.value)\">"
+    "      </div>"
     "    </div>"
     "  </div>"
     "</div>"
@@ -425,6 +494,20 @@ static const char *index_html =
     "  document.getElementById('dutyValue').textContent = value + '%';"
     "  updateDuty(value);"
     "}"
+    "function updateAutoStopUI(val) {"
+    "  var text = (val == 0) ? '关闭' : (val + '秒');"
+    "  document.getElementById('autoStopText').textContent = text;"
+    "}"
+    "function setAutoStop(val) {"
+    "  updateAutoStopUI(val);"
+    "  var xhr = new XMLHttpRequest();"
+    "  xhr.open('POST', '/auto_stop', true);"
+    "  xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');"
+    "  xhr.onreadystatechange = function() {"
+    "    if (xhr.readyState == 4 && xhr.status == 200) showToast('定时停机设为: ' + ((val==0)?'关闭':val+'秒'));"
+    "  };"
+    "  xhr.send('time=' + val);"
+    "}"
     "function updateStatus() {"
     "  var xhr = new XMLHttpRequest();"
     "  xhr.onreadystatechange = function() {"
@@ -455,6 +538,10 @@ static const char *index_html =
     "        }"
     "        if (d.led_state !== undefined)"
     "          document.getElementById('ledToggle').checked = (d.led_state == 1);"
+    "        if (d.auto_stop_sec !== undefined) {"
+    "          document.getElementById('autoStopSlider').value = d.auto_stop_sec;"
+    "          updateAutoStopUI(d.auto_stop_sec);"
+    "        }"
     "      } catch(e) {}"
     "    }"
     "  };"
@@ -743,6 +830,7 @@ static esp_err_t motor_speed_handler(httpd_req_t *req) {
         
         // 根据流量更新LED颜色
         update_led_by_flow(duty);
+        record_activity(); // 重置自动停机时间
     }
     
     httpd_resp_send(req, "{\"status\":\"ok\"}", 17);
@@ -767,6 +855,29 @@ static esp_err_t led_control_handler(httpd_req_t *req) {
             // 开启时根据当前流量设置颜色
             update_led_by_flow(current_motor_duty);
         }
+        record_activity(); // 重置自动停机时间
+    }
+    
+    httpd_resp_send(req, "{\"status\":\"ok\"}", 17);
+    return ESP_OK;
+}
+
+// 自动停机时间设置
+static esp_err_t auto_stop_handler(httpd_req_t *req) {
+    char content[64];
+    int ret = httpd_req_recv(req, content, sizeof(content) - 1);
+    if (ret <= 0) return ESP_FAIL;
+    content[ret] = '\0';
+    
+    char *p = strstr(content, "time=");
+    if (p) {
+        int sec = atoi(p + 5);
+        if (sec < 0) sec = 0;
+        if (sec > 300) sec = 300; // max 5 mins
+        current_auto_stop_sec = sec;
+        save_auto_stop_cfg(sec);
+        record_activity();
+        ESP_LOGI(TAG, "Auto stop time configured to %d s", sec);
     }
     
     httpd_resp_send(req, "{\"status\":\"ok\"}", 17);
@@ -784,17 +895,17 @@ static esp_err_t status_handler(httpd_req_t *req) {
     
     if (wifi_mgr_is_connected()) {
         snprintf(status_json, sizeof(status_json),
-            "{\"wifi_connected\":true,\"mode\":\"STA\",\"ssid\":\"%s\",\"ip\":\"%s\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d}",
-            wifi_mgr_get_saved_ssid(), wifi_mgr_get_ip(), current_motor_duty, current_led_state, sleeping);
+            "{\"wifi_connected\":true,\"mode\":\"STA\",\"ssid\":\"%s\",\"ip\":\"%s\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d,\"auto_stop_sec\":%d}",
+            wifi_mgr_get_saved_ssid(), wifi_mgr_get_ip(), current_motor_duty, current_led_state, sleeping, current_auto_stop_sec);
     } else {
         if (strlen(wifi_mgr_get_saved_ssid()) > 0) {
             snprintf(status_json, sizeof(status_json),
-                "{\"wifi_connected\":false,\"mode\":\"CONNECTING\",\"ssid\":\"%s\",\"ip\":\"\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d}",
-                wifi_mgr_get_saved_ssid(), current_motor_duty, current_led_state, sleeping);
+                "{\"wifi_connected\":false,\"mode\":\"CONNECTING\",\"ssid\":\"%s\",\"ip\":\"\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d,\"auto_stop_sec\":%d}",
+                wifi_mgr_get_saved_ssid(), current_motor_duty, current_led_state, sleeping, current_auto_stop_sec);
         } else {
             snprintf(status_json, sizeof(status_json),
-                "{\"wifi_connected\":false,\"mode\":\"AP\",\"ssid\":\"ESP32-Cat\",\"ip\":\"192.168.4.1\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d}",
-                current_motor_duty, current_led_state, sleeping);
+                "{\"wifi_connected\":false,\"mode\":\"AP\",\"ssid\":\"ESP32-Cat\",\"ip\":\"192.168.4.1\",\"motor_duty\":%d,\"led_state\":%d,\"sleeping\":%d,\"auto_stop_sec\":%d}",
+                current_motor_duty, current_led_state, sleeping, current_auto_stop_sec);
         }
     }
     
@@ -818,12 +929,14 @@ static esp_err_t power_control_handler(httpd_req_t *req) {
             power_mgr_shutdown();
             current_motor_duty = 0;    // 同步UI显示状态
             current_led_state = 0;
+            record_activity();
             httpd_resp_send(req, "{\"status\":\"ok\",\"action\":\"shutdown\"}", -1);
         } else if (strncmp(p, "wakeup", 6) == 0) {
             ESP_LOGI(TAG, "收到开机命令");
             power_mgr_wakeup();
-            current_motor_duty = power_mgr_get_saved_duty(); // 恢复UI显示状态
+            current_motor_duty = 0;  // 唤醒后电机停止，等待用户设置
             current_led_state = 1;
+            record_activity();
             httpd_resp_send(req, "{\"status\":\"ok\",\"action\":\"wakeup\"}", -1);
         } else {
             httpd_resp_send(req, "{\"status\":\"error\",\"msg\":\"unknown action\"}", -1);
@@ -843,12 +956,14 @@ static const httpd_uri_t uri_motor_speed = { .uri = "/motor_speed", .method = HT
 static const httpd_uri_t uri_led_control = { .uri = "/led_control", .method = HTTP_POST, .handler = led_control_handler };
 static const httpd_uri_t uri_status = { .uri = "/status", .method = HTTP_GET, .handler = status_handler };
 static const httpd_uri_t uri_power = { .uri = "/power", .method = HTTP_POST, .handler = power_control_handler };
+static const httpd_uri_t uri_auto_stop = { .uri = "/auto_stop", .method = HTTP_POST, .handler = auto_stop_handler };
 
 // 启动Web服务器
 esp_err_t start_web_server(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = 80;
+    config.max_uri_handlers = 12; // 增加最大支持的URI数量，默认只有8个
     
     if (httpd_start(&http_server, &config) == ESP_OK) {
         httpd_register_uri_handler(http_server, &uri_root);
@@ -859,9 +974,17 @@ esp_err_t start_web_server(void)
         httpd_register_uri_handler(http_server, &uri_led_control);
         httpd_register_uri_handler(http_server, &uri_status);
         httpd_register_uri_handler(http_server, &uri_power);
+        httpd_register_uri_handler(http_server, &uri_auto_stop);
         
         // 初始化LED颜色
         update_led_by_flow(current_motor_duty);
+
+        // 加载并初始化自动停机
+        load_auto_stop_cfg();
+        record_activity();
+        if (auto_stop_task_handle == NULL) {
+            xTaskCreate(auto_stop_task, "auto_stop_task", 2048, NULL, 5, &auto_stop_task_handle);
+        }
         
         ESP_LOGI(TAG, "HTTP Server started");
         return ESP_OK;
@@ -872,6 +995,10 @@ esp_err_t start_web_server(void)
 // 停止Web服务器
 void stop_web_server(void)
 {
+    if (auto_stop_task_handle) {
+        vTaskDelete(auto_stop_task_handle);
+        auto_stop_task_handle = NULL;
+    }
     if (http_server) {
         httpd_stop(http_server);
         http_server = NULL;

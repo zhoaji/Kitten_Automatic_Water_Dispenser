@@ -12,13 +12,13 @@ static const char *TAG = "power_mgr";
 // 是否处于睡眠（关机）状态
 static volatile bool s_sleeping = false;
 
-// 关机前保存的电机占空比，默认50%
-static volatile int s_saved_duty = 50;
+// 关机前保存的电机占空比，默认0（唤醒后不自动恢复）
+static volatile int s_saved_duty = 0;
 
 void power_mgr_init(void)
 {
     s_sleeping = false;
-    s_saved_duty = 50;
+    s_saved_duty = 0;
     ESP_LOGI(TAG, "电源管理模块初始化完成");
 }
 
@@ -53,23 +53,23 @@ void power_mgr_wakeup(void)
         return;
     }
 
-    ESP_LOGI(TAG, "执行唤醒操作：恢复电机和LED...");
+    ESP_LOGI(TAG, "执行唤醒操作：恢复WiFi性能和LED...");
 
     // 1. 退出Modem Sleep（恢复正常WiFi性能）
     esp_wifi_set_ps(WIFI_PS_NONE);
 
-    // 2. 清除睡眠标志（先清标志，再恢复外设）
+    // 2. 清除睡眠标志
     s_sleeping = false;
 
-    // 3. 恢复电机到关机前的流量
-    motor_mgr_set_duty((uint32_t)s_saved_duty);
-    ESP_LOGI(TAG, "电机已恢复，流量: %d%%", s_saved_duty);
+    // 3. 电机保持停止（GPIO 高电平），等待用户主动设置水流
+    //    不调用 motor_mgr_set_duty()，确保唤醒后电机不会自动启动
+    ESP_LOGI(TAG, "电机保持停止，等待用户设置水流");
 
     // 4. 恢复LED状态
     led_mgr_set_state(1);
     ESP_LOGI(TAG, "LED已恢复");
 
-    ESP_LOGI(TAG, "设备已唤醒，恢复正常运行");
+    ESP_LOGI(TAG, "设备已唤醒，电机停止等待用户操作");
 }
 
 bool power_mgr_is_sleeping(void)
