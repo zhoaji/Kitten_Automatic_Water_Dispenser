@@ -10,6 +10,8 @@
 #include "serial_cmd.h"
 #include "motor_mgr.h"
 #include "power_mgr.h"
+#include "ssh_server.h"
+#include "autostop_mgr.h"
 
 static const char *TAG = "main";
 
@@ -31,6 +33,7 @@ void app_main(void)
     serial_cmd_init();
     wifi_mgr_init();
     power_mgr_init();
+    autostop_mgr_init();
     
     // Check if we have Wi-Fi config
     if (strlen(wifi_mgr_get_saved_ssid()) > 0) {
@@ -40,6 +43,7 @@ void app_main(void)
         if (wifi_mgr_is_connected()) {
             // Start web server in STA mode
             start_web_server();
+            ssh_server_init();
             
             // Keep app_main running
             while (1) {
@@ -51,6 +55,7 @@ void app_main(void)
     // If no Wi-Fi config or connection failed, start AP mode
     wifi_mgr_start_ap();
     start_web_server();
+    ssh_server_init();
     
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));

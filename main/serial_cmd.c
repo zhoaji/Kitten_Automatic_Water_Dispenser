@@ -5,7 +5,14 @@
 #include "freertos/task.h"
 #include "driver/uart.h"
 #include "esp_system.h"
-#include "wifi_mgr.h" // Needed to check status and clear config
+#include "wifi_mgr.h"
+#include "cmd_handler.h"
+
+static void serial_write_cb(const char *str, void *ctx)
+{
+    printf("%s", str);
+    fflush(stdout);
+}
 
 static void serial_command_task(void *pvParameters)
 {
@@ -53,33 +60,7 @@ static void serial_command_task(void *pvParameters)
                     cmd_buffer[cmd_index] = '\0';
                     cmd_index = 0;
                     
-                    if (strcmp(cmd_buffer, "reset") == 0 || strcmp(cmd_buffer, "reset_wifi") == 0) {
-                        printf("Resetting Wi-Fi configuration...\n");
-                        wifi_mgr_clear_config();
-                        printf("Wi-Fi config cleared. Restarting...\n");
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                        esp_restart();
-                    } else if (strcmp(cmd_buffer, "restart") == 0) {
-                        printf("Restarting ESP32...\n");
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                        esp_restart();
-                    } else if (strcmp(cmd_buffer, "status") == 0) {
-                        printf("Wi-Fi Status: %s\n", wifi_mgr_is_connected() ? "Connected" : "Disconnected");
-                        printf("SSID: %s\n", wifi_mgr_get_saved_ssid());
-                        printf("Retry count: %d/%d\n", wifi_mgr_get_retry_num(), wifi_mgr_get_max_retry());
-                    } else if (strcmp(cmd_buffer, "ap") == 0) {
-                        printf("Switching to AP mode...\n");
-                        wifi_mgr_clear_config();
-                        vTaskDelay(pdMS_TO_TICKS(500));
-                        esp_restart();
-                    } else {
-                        printf("Unknown command: %s\n", cmd_buffer);
-                        printf("Available commands:\n");
-                        printf("  reset     - Clear Wi-Fi config and restart\n");
-                        printf("  restart   - Restart ESP32\n");
-                        printf("  ap        - Switch to AP mode\n");
-                        printf("  status    - Show Wi-Fi status\n");
-                    }
+                    cmd_handle(cmd_buffer, serial_write_cb, NULL);
                 }
                 printf(">");
                 fflush(stdout);
