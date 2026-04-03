@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "libssh/libssh.h"
 #include "libssh/server.h"
+#include "libssh/callbacks.h"
 #include "cmd_handler.h"
 #include "wifi_mgr.h"
 #include "power_mgr.h"
@@ -15,15 +16,10 @@ static const char *TAG = "ssh_server";
 
 #define SSH_PORT 22
 
-// 硬编码的 ED25519 Host Key (供内部使用，避免依赖文件系统保存密钥)
-// 这是随便生成的一个固定密钥，这样免去设备重启或者没有文件系统导致 Host Key 变化
-static const unsigned char host_key_ed25519[] = {
-    0x30, 0x51, 0x02, 0x01, 0x01, 0x04, 0x20, 0x8a, 0x6e, 0x76, 0x63, 0xc1, 0x3d, 0xfe, 0x18, 0x7b,
-    0x1d, 0xf6, 0xe1, 0x61, 0x2a, 0x36, 0xe2, 0x7c, 0xc5, 0x6c, 0x7d, 0x48, 0x27, 0x25, 0xde, 0x47,
-    0x8f, 0x56, 0x24, 0xa1, 0x0e, 0x41, 0x76, 0xa1, 0x23, 0x03, 0x21, 0x00, 0x30, 0x76, 0x1d, 0xcb,
-    0xc7, 0xdf, 0xc5, 0x93, 0x3e, 0x40, 0x51, 0x76, 0xba, 0xb6, 0xa8, 0xf6, 0xe7, 0x57, 0xdf, 0xa6,
-    0x2c, 0xc8, 0xe7, 0x55, 0x61, 0xc8, 0x6c, 0xc4, 0x78, 0xd0, 0xaa, 0x21
-};
+// 硬编码密钥已改为 RSA 动态生成，此处数组不再使用
+typedef struct {
+    bool authenticated;
+} ssh_session_data_t;
 
 // SSH 输出回调
 static void ssh_write_cmd_cb(const char *str, void *ctx)
@@ -68,7 +64,9 @@ static void show_welcome_screen(ssh_channel channel)
 
 // 身份验证回调
 static int auth_none_cb(ssh_session session, const char *user, void *userdata) {
+    ssh_session_data_t *data = (ssh_session_data_t *)userdata;
     ESP_LOGI(TAG, "接受无密码用户登录: %s", user ? user : "unknown");
+    if (data) data->authenticated = true;
     return SSH_AUTH_SUCCESS;
 }
 
@@ -83,8 +81,10 @@ static void ssh_session_task(void *pvParameters)
     ssh_session session = (ssh_session)pvParameters;
     ssh_event event = ssh_event_new();
     
+    ssh_session_data_t session_data = { .authenticated = false };
+    
     struct ssh_server_callbacks_struct cb = {
-        .userdata = NULL,
+        .userdata = &session_data,
         .auth_none_function = auth_none_cb,
         .channel_open_request_session_function = channel_open_request_cb
     };
@@ -99,7 +99,7 @@ static void ssh_session_task(void *pvParameters)
     ssh_event_add_session(event, session);
     
     // 认证循环
-    while (!ssh_is_connected(session) || !ssh_is_authenticated(session)) {
+    while (ssh_is_connected(session) && !session_data.authenticated) {
         if (ssh_event_dopoll(event, -1) == SSH_ERROR) goto cleanup;
     }
 
@@ -215,32 +215,56 @@ static void ssh_server_listener_task(void *pvParameters)
 
     ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_BINDPORT_STR, "22");
     
-    // 直接用我们在内存中硬编码的私钥导入，由于 libssh bind API 等一般期望文件路径，
-    // 这里导入一个私钥到 PKI
-    ssh_key rsakey = NULL;
-    int rc = ssh_pki_import_privkey_base64(
-        "MC4CAQAwBQYDK2VwBCIEIEo/r3N9M4o0Z/K2P+9nJj8uD0L6OqI+D8SgLhD4P9eF", // Base64 ed25519 dummy
-        NULL,
-        NULL,
-        NULL,
-        &rsakey
-    );
-    if (rc == SSH_OK) {
-        // 由于无文档记录的可以直接传 pki. 但是通过临时写一个文件是比较通用的：
-        // 或者不配置，但是因为没有 host key, ssh_bind_listen 会失败
-        // 我们改为通过 IMPORT 导入并在 callback 里。
-    }
-    
-    // 我们最稳妥的做法是用 libssh 的内置 pki 生成（如果没有文件系统）。
-    // ESP-IDF libssh 的 port 提供了 ssh_bind_options_set() 可以设定 imported key,
-    // 但保险起见，我们设置一个内置 rsa_key，这需要修改一下。
-    // 但是最简单的方法是使用 ssh_pki_generate 临时生成，因为设备内存中保留 host key 就行了：
+    // 使用预置的 ED25519 私钥，避免在 ESP32 上动态生成失败（rc=-1）
+    // 替换掉之前那个 ED25519 的密钥
+// 替换成新生成的 OpenSSH 格式 RSA 密钥 Base64
+  const char *privkey_pem = 
+        "-----BEGIN RSA PRIVATE KEY-----"
+        "MIIEogIBAAKCAQEArEWqT6tsug8WEZ+aPd1qR54ih22dUZ4KFednFCzR1VDh7fJ3"
+        "sp1a1yWjEB3R9MBljKI8INftBrKVsRyIGYAV56V8srRas4U9AlSYjJpCz7+ZhOj2"
+        "o59qh9l9d05B10Htpq8wRoxp1yiQNkXH7iaLfeE2XYwjtN31mMexi3X07TsY5YlB"
+        "qwCgPmeCpgHFFrmZQ0fNsI72stUjjHGXHZoE+/ADE9qi69NMFnIDj0Sd0xwbUCZr"
+        "ScBuZPCg36pplUt299eHaX+shI0PjOOeuYmCj3kNkV6zTGa7ouiUL9CuADAYLXz1"
+        "abfvXTScVeFw3k2zGJsWi3JFJpE9yFTZk6Q4cwIDAQABAoIBACqbfFkCC/0kmA+5"
+        "yrs8VPnrmZynNr6l+NacCfmKcEdzHr3sN0Cc/IezzlXBGlmPcE5NHdP9s6jxaGaK"
+        "qPqtnD1Tx7inNLur24AFDknQKXAackzWFZI4bm+1Efv9BfnIW4/bSnRYbCED7k8O"
+        "CTnUnLGAjyKp83bbYs/rq/TTMsWtbPkrmIm+KlyduDVNemYquN3Ia6JZIPxKgi3p"
+        "yOabD2th1+wU3k0qXb5ehFSO7iZAA4a8inMt6+f0/RYQXTmtk0bOEYezHOBwgquA"
+        "unYBN7f6mRqWmkMZBEXQpiS2+AE5yLeUR4KZ4vyST9ukaPTwCWT2yLuEAuYjhqDp"
+        "s5g23xECgYEA4mwAnbWnW9RvR1PfkTN/zkKeCZ46yTZyHWSVQtwibj5Hyj1BLsKy"
+        "59EefmljB8ix8GjDc0tevnEYRpQTP00ylDgnReHgl1GmmZtOoOtOd8baVg1CIgnc"
+        "THq7WsJz7oJKsJRgF/dV7np7xeaop1powIlHFcj9lL16VOX1TULjRKkCgYEAwsbJ"
+        "msLYW4H9lqvUuTk8fkDH8OneflvYEE3sjVwMbZ90lm7Shq+ljL0J0NB7BsXyTAb1"
+        "Bp+AxJjHxMaJi+LQvajAJ6nSBi+j/8ZpWqEc9aH/2MZOvxD91TfsmODoPgsog1N6"
+        "eQxVYAD6X+tXGgKbdEYCz/fXsXdgRmxjnWfSKbsCgYBS/GqtYurYCWBPsDn8qfdp"
+        "zZjGxaueG8pvY3IhczVbWpBNW24MiWew90BJ7K5TKAevqXYZR8KN4j2XgKYdSVoE"
+        "YSBjyIncbBy3p+iFqji0Rbm4WFuoxhxsG3+XoDWFcVOWrIsbvZdNNK8wtX2S+Nvz"
+        "1Vysa2Ilpdy0SSRDEQTjIQKBgCoj3gxYqXyq1BWcGYr1Yiwikd+Cibum3UkxwsMW"
+        "ri2teQju8ydmqxeW8p+161gczX47ZxnGupJOR7JADhQwv165OtGaATGLbxzwbWzJ"
+        "PL28DeF1jiXyZCiUT+EHj9eUjHBVSEMWMwZxT7oe7ZpYBBAU8ZjTE1x26mJyIt80"
+        "ThjvAoGAfyZuieaBb71FdTt1L6TvFiJmj6dmEC6stET/4QTUOS8aF9TT+v8+EywM"
+        "ikgBK8YHMj3sn8+UjWaxiLmNm4FjTCB574hXlrLkiNMp1JSBdqjIATHEi+7ZEmJO"
+        "pc7FnfCX6EQjuaRewLd0/Z6UvjU4VFEPMGGH6+Bn8SQPaV9Moz8="
+        "-----END RSA PRIVATE KEY-----";
+
+
     ssh_key pk = NULL;
-    ssh_pki_generate(SSH_KEYTYPE_ED25519, 0, &pk);
-    if(pk != NULL) {
+    // 依然使用这个函数，把带有换行和头尾的完整 PEM 字符串传给它
+    int rc_import = ssh_pki_import_privkey_base64(privkey_pem, NULL, NULL, NULL, &pk);
+
+    if (rc_import == SSH_OK && pk != NULL) {
         ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_IMPORT_KEY, pk);
+        ESP_LOGI(TAG, "终于成功啦！已导入主机密钥 (RSA PEM)");
     } else {
-        ESP_LOGE(TAG, "Failed to generate host key");
+        ESP_LOGE(TAG, "导入主机密钥失败, rc=%d", rc_import);
+        goto end;
+    }
+////////////////////////////////////////////////////////////////////////////
+    if (rc_import == SSH_OK && pk != NULL) {
+        ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_IMPORT_KEY, pk);
+        ESP_LOGI(TAG, "已成功导入硬编码的主机密钥 (ED25519)");
+    } else {
+        ESP_LOGE(TAG, "导入主机密钥失败, rc=%d", rc_import);
         goto end;
     }
 
@@ -280,5 +304,5 @@ end:
 void ssh_server_init(void)
 {
     ESP_LOGI(TAG, "Starting SSH Server Task...");
-    xTaskCreate(ssh_server_listener_task, "ssh_server_task", 8192, NULL, 5, NULL);
+    xTaskCreate(ssh_server_listener_task, "ssh_server_task", 16384, NULL, 5, NULL);
 }
