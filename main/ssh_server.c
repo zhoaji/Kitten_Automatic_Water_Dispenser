@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "libssh/libssh.h"
 #include "libssh/server.h"
+#include "libssh/callbacks.h"
 #include "cmd_handler.h"
 #include "wifi_mgr.h"
 #include "power_mgr.h"
@@ -55,6 +56,10 @@ static const char *hardcoded_example_host_key =
 	"JubTlEItwZ4/28ocWtCVJmltbOolU0oDNaxTUQ5q7puV7ge2Ze4ELX80EKkttuYQ50heDh\n"
 	"l9rTiUsxla43sBAAAAHHRubkB0MzYxMC5yeW1kZmFydHN2ZXJrZXQuc2UBAgMEBQY=\n"
 	"-----END OPENSSH PRIVATE KEY-----\n";
+
+typedef struct {
+    bool authenticated;
+} ssh_session_data_t;
 
 /*
  * 从 example-master 中借鉴的热修复方法：暴力指针修改绑定的主机密钥
@@ -163,7 +168,9 @@ static void show_welcome_screen(ssh_channel channel)
 
 // 身份验证回调
 static int auth_none_cb(ssh_session session, const char *user, void *userdata) {
+    ssh_session_data_t *data = (ssh_session_data_t *)userdata;
     ESP_LOGI(TAG, "接受无密码用户登录: %s", user ? user : "unknown");
+    if (data) data->authenticated = true;
     return SSH_AUTH_SUCCESS;
 }
 
@@ -178,8 +185,10 @@ static void ssh_session_task(void *pvParameters)
     ssh_session session = (ssh_session)pvParameters;
     ssh_event event = ssh_event_new();
     
+    ssh_session_data_t session_data = { .authenticated = false };
+    
     struct ssh_server_callbacks_struct cb = {
-        .userdata = NULL,
+        .userdata = &session_data,
         .auth_none_function = auth_none_cb,
         .channel_open_request_session_function = channel_open_request_cb
     };
@@ -194,7 +203,7 @@ static void ssh_session_task(void *pvParameters)
     ssh_event_add_session(event, session);
     
     // 认证循环
-    while (!ssh_is_connected(session) || !ssh_is_authenticated(session)) {
+    while (ssh_is_connected(session) && !session_data.authenticated) {
         if (ssh_event_dopoll(event, -1) == SSH_ERROR) goto cleanup;
     }
 
@@ -351,5 +360,5 @@ end:
 void ssh_server_init(void)
 {
     ESP_LOGI(TAG, "Starting SSH Server Task...");
-    xTaskCreate(ssh_server_listener_task, "ssh_server_task", 8192, NULL, 5, NULL);
+    xTaskCreate(ssh_server_listener_task, "ssh_server_task", 16384, NULL, 5, NULL);
 }

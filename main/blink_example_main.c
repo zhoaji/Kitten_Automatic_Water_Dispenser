@@ -11,7 +11,6 @@
 #include "motor_mgr.h"
 #include "power_mgr.h"
 #include "ssh_server.h"
-#include "autostop_mgr.h"
 
 static const char *TAG = "main";
 
@@ -33,7 +32,6 @@ void app_main(void)
     serial_cmd_init();
     wifi_mgr_init();
     power_mgr_init();
-    autostop_mgr_init();
     
     // Check if we have Wi-Fi config
     if (strlen(wifi_mgr_get_saved_ssid()) > 0) {

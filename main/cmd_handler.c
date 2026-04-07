@@ -7,7 +7,7 @@
 #include "led_mgr.h"
 #include "motor_mgr.h"
 #include "power_mgr.h"
-#include "autostop_mgr.h"
+#include "power_mgr.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -60,7 +60,7 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
     if (argc == 0) return;
 
     // 每次执行有效命令，如果有设置自动关停时间，就喂狗
-    autostop_mgr_reset_timer();
+    // 为串口/终端命令活动做记录（预留，如果需要联动自动关停）
 
     if (strcmp(argv[0], "status") == 0) {
         _printf_wrapper(write_fn, ctx, "=== 设备状态 ===\n");
@@ -74,12 +74,7 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
         uint8_t r, g, b;
         led_mgr_get_color(&r, &g, &b);
         _printf_wrapper(write_fn, ctx, "LED颜色: R:%d G:%d B:%d\n", r, g, b);
-        uint32_t to = autostop_mgr_get_timeout();
-        if (to == 0) {
-            _printf_wrapper(write_fn, ctx, "无操作自动关停: 已禁用\n");
-        } else {
-            _printf_wrapper(write_fn, ctx, "无操作自动关停: %lu 秒\n", to);
-        }
+        _printf_wrapper(write_fn, ctx, "LED颜色: R:%d G:%d B:%d\n", r, g, b);
     } else if (strcmp(argv[0], "led") == 0) {
         if (argc > 1) {
             if (strcmp(argv[1], "on") == 0) {
@@ -130,23 +125,8 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
     } else if (strcmp(argv[0], "wakeup") == 0) {
         _printf_wrapper(write_fn, ctx, "设备已被唤醒\n");
         power_mgr_wakeup();
-    } else if (strcmp(argv[0], "autostop") == 0) {
-        if (argc > 1) {
-            if (strcmp(argv[1], "off") == 0) {
-                autostop_mgr_set_timeout(0);
-                _printf_wrapper(write_fn, ctx, "无操作自动关停功能已禁用\n");
-            } else {
-                int sec = atoi(argv[1]);
-                if (sec > 0) {
-                    autostop_mgr_set_timeout(sec);
-                    _printf_wrapper(write_fn, ctx, "无操作自动关停设置为: %d 秒\n", sec);
-                } else {
-                    _printf_wrapper(write_fn, ctx, "错误的秒数\n");
-                }
-            }
-        } else {
-            _printf_wrapper(write_fn, ctx, "缺少参数 (例如: autostop 60 / autostop off)\n");
-        }
+        _printf_wrapper(write_fn, ctx, "设备已被唤醒\n");
+        power_mgr_wakeup();
     } else if (strcmp(argv[0], "restart") == 0) {
         _printf_wrapper(write_fn, ctx, "重启 ESP32...\n");
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -169,7 +149,8 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
         _printf_wrapper(write_fn, ctx, "  flow <0-100>    - 设置水流量 (百分比)\n");
         _printf_wrapper(write_fn, ctx, "  sleep           - 进入休眠模式\n");
         _printf_wrapper(write_fn, ctx, "  wakeup          - 从休眠状态唤醒\n");
-        _printf_wrapper(write_fn, ctx, "  autostop <秒数>  - 设置无操作自动关停时间 (或用 autostop off)\n");
+        _printf_wrapper(write_fn, ctx, "  sleep           - 进入休眠模式\n");
+        _printf_wrapper(write_fn, ctx, "  wakeup          - 从休眠状态唤醒\n");
         _printf_wrapper(write_fn, ctx, "  restart         - 重启设备\n");
         _printf_wrapper(write_fn, ctx, "  reset           - 清空所有设置并重启\n");
         _printf_wrapper(write_fn, ctx, "  ap              - 切换并强行进入配网 AP 模式\n");
