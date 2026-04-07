@@ -93,17 +93,17 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
     } else if (strcmp(argv[0], "led") == 0) {
         if (argc > 1) {
             if (strcmp(argv[1], "on") == 0) {
-                led_mgr_set_state(1);
+                web_server_set_led_state(1);
                 _printf_wrapper(write_fn, ctx, "LED 已开启\n");
             } else if (strcmp(argv[1], "off") == 0) {
-                led_mgr_set_state(0);
+                web_server_set_led_state(0);
                 _printf_wrapper(write_fn, ctx, "LED 已关闭\n");
             } else if (strcmp(argv[1], "color") == 0 && argc == 5) {
                 int r = atoi(argv[2]);
                 int g = atoi(argv[3]);
                 int b = atoi(argv[4]);
                 led_mgr_set_color(r, g, b);
-                led_mgr_set_state(1);
+                web_server_set_led_state(1); // 设置颜色时同步开启并更新 web 状态
                 _printf_wrapper(write_fn, ctx, "LED 颜色已设置为 R:%d G:%d B:%d\n", r, g, b);
             } else {
                 _printf_wrapper(write_fn, ctx, "参数错误, 示例: led on / led off / led color 255 0 0\n");
@@ -114,34 +114,41 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
     } else if (strcmp(argv[0], "flow") == 0) {
         if (argc > 1) {
             int duty = atoi(argv[1]);
-            if (duty < 0) duty = 0;
-            if (duty > 100) duty = 100;
-            motor_mgr_set_duty(duty);
-            power_mgr_set_saved_duty(duty); // 记录当前设置以便之后唤醒恢复
-            
-            // 如果流量为0，联动关闭LED。否则根据流量调整颜色(0绿->100红)并开启LED
-            if (duty == 0) {
-               led_mgr_set_state(0);
-               _printf_wrapper(write_fn, ctx, "水流量已设置为 %d%% (停止)\n", duty);
+            web_server_set_motor_duty(duty); // 统一通过 web_server 设置，确保 web页面和自动关闭计时器同步
+            if (duty <= 0) {
+                _printf_wrapper(write_fn, ctx, "水流量已设置为 0%% (停止)\n");
             } else {
-               int r = (duty * 255) / 100;
-               int g = 255 - r;
-               int b = 0;
-               led_mgr_set_color(r, g, b);
-               led_mgr_set_state(1);
-               _printf_wrapper(write_fn, ctx, "水流量已设置为 %d%%\n", duty);
+                _printf_wrapper(write_fn, ctx, "水流量已设置为 %d%%\n", web_server_get_motor_duty());
             }
         } else {
             _printf_wrapper(write_fn, ctx, "缺少流量百分比 (示例: flow 50)\n");
+        }
+    } else if (strcmp(argv[0], "autostop") == 0) {
+        if (argc > 1) {
+            int sec = atoi(argv[1]);
+            if (sec < 0) sec = 0;
+            web_server_set_auto_stop_sec(sec);
+            if (sec == 0) {
+                _printf_wrapper(write_fn, ctx, "自动关闭已禁用\n");
+            } else if (sec < 60) {
+                _printf_wrapper(write_fn, ctx, "自动关闭已设定为无操作 %d 秒后停止\n", sec);
+            } else {
+                _printf_wrapper(write_fn, ctx, "自动关闭已设定为无操作 %d 分钟后停止\n", sec / 60);
+            }
+        } else {
+            int cur = web_server_get_auto_stop_sec();
+            if (cur == 0) {
+                _printf_wrapper(write_fn, ctx, "当前自动关闭: 未开启\n用法: autostop <秒数> (例: autostop 300)  0=关闭\n");
+            } else {
+                _printf_wrapper(write_fn, ctx, "当前自动关闭: 无操作 %d 秒后停止\n用法: autostop <秒数>  0=关闭\n", cur);
+            }
         }
     } else if (strcmp(argv[0], "sleep") == 0) {
         _printf_wrapper(write_fn, ctx, "设备即将进入低功耗休眠模式\n");
         power_mgr_shutdown();
     } else if (strcmp(argv[0], "wakeup") == 0) {
-        _printf_wrapper(write_fn, ctx, "设备已被唤醒\n");
         power_mgr_wakeup();
         _printf_wrapper(write_fn, ctx, "设备已被唤醒\n");
-        power_mgr_wakeup();
     } else if (strcmp(argv[0], "restart") == 0) {
         _printf_wrapper(write_fn, ctx, "重启 ESP32...\n");
         vTaskDelay(pdMS_TO_TICKS(500));
@@ -158,18 +165,17 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
         esp_restart();
     } else if (strcmp(argv[0], "help") == 0 || strcmp(argv[0], "?") == 0) {
         _printf_wrapper(write_fn, ctx, "可用命令：\n");
-        _printf_wrapper(write_fn, ctx, "  status          - 查看设备运行状态\n");
-        _printf_wrapper(write_fn, ctx, "  led on/off      - 开启 / 关闭 LED 灯\n");
-        _printf_wrapper(write_fn, ctx, "  led color R G B - 设置 LED 颜色 (0-255)\n");
-        _printf_wrapper(write_fn, ctx, "  flow <0-100>    - 设置水流量 (百分比)\n");
-        _printf_wrapper(write_fn, ctx, "  sleep           - 进入休眠模式\n");
-        _printf_wrapper(write_fn, ctx, "  wakeup          - 从休眠状态唤醒\n");
-        _printf_wrapper(write_fn, ctx, "  sleep           - 进入休眠模式\n");
-        _printf_wrapper(write_fn, ctx, "  wakeup          - 从休眠状态唤醒\n");
-        _printf_wrapper(write_fn, ctx, "  restart         - 重启设备\n");
-        _printf_wrapper(write_fn, ctx, "  reset           - 清空所有设置并重启\n");
-        _printf_wrapper(write_fn, ctx, "  ap              - 切换并强行进入配网 AP 模式\n");
-        _printf_wrapper(write_fn, ctx, "  help            - 显示此帮助信息\n");
+        _printf_wrapper(write_fn, ctx, "  status              - 查看设备运行状态\n");
+        _printf_wrapper(write_fn, ctx, "  led on/off          - 开启 / 关闭 LED 灯\n");
+        _printf_wrapper(write_fn, ctx, "  led color R G B     - 设置 LED 颜色 (0-255)\n");
+        _printf_wrapper(write_fn, ctx, "  flow <0-100>        - 设置水流量 (百分比)\n");
+        _printf_wrapper(write_fn, ctx, "  autostop <秒数>    - 设置无操作自动关阀 (0=关闭, 例: autostop 300)\n");
+        _printf_wrapper(write_fn, ctx, "  sleep               - 进入休眠模式\n");
+        _printf_wrapper(write_fn, ctx, "  wakeup              - 从休眠状态唤醒\n");
+        _printf_wrapper(write_fn, ctx, "  restart             - 重启设备\n");
+        _printf_wrapper(write_fn, ctx, "  reset               - 清空所有设置并重启\n");
+        _printf_wrapper(write_fn, ctx, "  ap                  - 切换并强行进入配网 AP 模式\n");
+        _printf_wrapper(write_fn, ctx, "  help                - 显示此帮助信息\n");
     } else {
         _printf_wrapper(write_fn, ctx, "未知命令: %s (输入 'help' 查看清单)\n", argv[0]);
     }

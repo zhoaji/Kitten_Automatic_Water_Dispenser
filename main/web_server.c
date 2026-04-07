@@ -29,9 +29,33 @@ static const char *NVS_NAMESPACE = "cat_water";
 static const char *NVS_KEY_AUTOSTOP = "auto_stop_sec";
 
 static void update_led_by_flow(int duty);
+static void record_activity(void);
+static void save_auto_stop_cfg(int sec);
 
 int web_server_get_motor_duty(void) { return current_motor_duty; }
 int web_server_get_auto_stop_sec(void) { return current_auto_stop_sec; }
+
+void web_server_set_motor_duty(int duty) {
+    if (duty < 0) duty = 0;
+    if (duty > 100) duty = 100;
+    current_motor_duty = duty;
+    motor_mgr_set_duty(duty);
+    power_mgr_set_saved_duty(duty);
+    update_led_by_flow(duty);
+    record_activity(); // 重置自动关闭计时器
+}
+
+void web_server_set_auto_stop_sec(int sec) {
+    if (sec < 0) sec = 0;
+    current_auto_stop_sec = sec;
+    save_auto_stop_cfg(sec);
+    record_activity(); // 重置计时器起点
+}
+
+void web_server_set_led_state(int state) {
+    current_led_state = state;
+    led_mgr_set_state(state);
+}
 
 static void record_activity() {
     last_activity_tick = xTaskGetTickCount();
