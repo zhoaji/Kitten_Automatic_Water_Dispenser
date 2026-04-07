@@ -15,15 +15,110 @@ static const char *TAG = "ssh_server";
 
 #define SSH_PORT 22
 
-// 硬编码的 ED25519 Host Key (供内部使用，避免依赖文件系统保存密钥)
-// 这是随便生成的一个固定密钥，这样免去设备重启或者没有文件系统导致 Host Key 变化
-static const unsigned char host_key_ed25519[] = {
-    0x30, 0x51, 0x02, 0x01, 0x01, 0x04, 0x20, 0x8a, 0x6e, 0x76, 0x63, 0xc1, 0x3d, 0xfe, 0x18, 0x7b,
-    0x1d, 0xf6, 0xe1, 0x61, 0x2a, 0x36, 0xe2, 0x7c, 0xc5, 0x6c, 0x7d, 0x48, 0x27, 0x25, 0xde, 0x47,
-    0x8f, 0x56, 0x24, 0xa1, 0x0e, 0x41, 0x76, 0xa1, 0x23, 0x03, 0x21, 0x00, 0x30, 0x76, 0x1d, 0xcb,
-    0xc7, 0xdf, 0xc5, 0x93, 0x3e, 0x40, 0x51, 0x76, 0xba, 0xb6, 0xa8, 0xf6, 0xe7, 0x57, 0xdf, 0xa6,
-    0x2c, 0xc8, 0xe7, 0x55, 0x61, 0xc8, 0x6c, 0xc4, 0x78, 0xd0, 0xaa, 0x21
-};
+// 借鉴 example-master 的硬编码主机密钥
+static const char *hardcoded_example_host_key =
+	"-----BEGIN OPENSSH PRIVATE KEY-----\n"
+	"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\n"
+	"-----END OPENSSH PRIVATE KEY-----\n";
+
+/*
+ * 从 example-master 中借鉴的热修复方法：暴力指针修改绑定的主机密钥
+ * 因为上游并不支持直接通过内存加载主机私钥，这个函数用来修改 struct ssh_bind_struct 的内存
+ */
+static int import_embedded_host_key(ssh_bind sshbind, const char *base64_key)
+{
+	size_t ptralign = sizeof(void*);
+	char buf[2048];
+	char *p, *q, *e;
+	ssh_key *target;
+	int error;
+	ssh_key probe;
+	enum ssh_keytypes_e type;
+
+	ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_BINDADDR, "");
+	memcpy(buf, sshbind, sizeof(buf));
+	ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_BINDADDR,
+			     "0123456789ABCDEF0123456789ABCDEF");
+	p = buf;
+	e = p + sizeof(buf);
+	q = (char*)sshbind;
+	while (p < e) {
+		if (memcmp(p, q, ptralign) != 0)
+			break;
+		p += ptralign;
+		q += ptralign;
+	}
+	if (p >= e)
+		return SSH_ERROR;
+	probe = ssh_key_new();
+	if (probe == NULL)
+		return SSH_ERROR;
+	error = ssh_pki_import_privkey_base64(base64_key, NULL, NULL, NULL,
+					      &probe);
+	type = ssh_key_type(probe);
+	ssh_key_free(probe);
+	if (error != SSH_OK)
+		return error;
+	switch (type) {
+	case SSH_KEYTYPE_ECDSA_P256:
+	case SSH_KEYTYPE_ECDSA_P521:
+		target = (ssh_key*)((uintptr_t)sshbind + (p - buf)
+				    - 4 * ptralign);
+		break;
+	case SSH_KEYTYPE_DSS:
+		target = (ssh_key*)((uintptr_t)sshbind + (p - buf)
+				    - 3 * ptralign);
+		break;
+	case SSH_KEYTYPE_RSA:
+		target = (ssh_key*)((uintptr_t)sshbind + (p - buf)
+				    - 2 * ptralign);
+		break;
+	case SSH_KEYTYPE_ED25519:
+		target = (ssh_key*)((uintptr_t)sshbind + (p - buf)
+				    - 1 * ptralign);
+		break;
+	default:
+		return SSH_ERROR;
+	}
+	error = ssh_pki_import_privkey_base64(base64_key, NULL, NULL, NULL,
+					      target);
+	return error;
+}
 
 // SSH 输出回调
 static void ssh_write_cmd_cb(const char *str, void *ctx)
@@ -215,32 +310,9 @@ static void ssh_server_listener_task(void *pvParameters)
 
     ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_BINDPORT_STR, "22");
     
-    // 直接用我们在内存中硬编码的私钥导入，由于 libssh bind API 等一般期望文件路径，
-    // 这里导入一个私钥到 PKI
-    ssh_key rsakey = NULL;
-    int rc = ssh_pki_import_privkey_base64(
-        "MC4CAQAwBQYDK2VwBCIEIEo/r3N9M4o0Z/K2P+9nJj8uD0L6OqI+D8SgLhD4P9eF", // Base64 ed25519 dummy
-        NULL,
-        NULL,
-        NULL,
-        &rsakey
-    );
-    if (rc == SSH_OK) {
-        // 由于无文档记录的可以直接传 pki. 但是通过临时写一个文件是比较通用的：
-        // 或者不配置，但是因为没有 host key, ssh_bind_listen 会失败
-        // 我们改为通过 IMPORT 导入并在 callback 里。
-    }
-    
-    // 我们最稳妥的做法是用 libssh 的内置 pki 生成（如果没有文件系统）。
-    // ESP-IDF libssh 的 port 提供了 ssh_bind_options_set() 可以设定 imported key,
-    // 但保险起见，我们设置一个内置 rsa_key，这需要修改一下。
-    // 但是最简单的方法是使用 ssh_pki_generate 临时生成，因为设备内存中保留 host key 就行了：
-    ssh_key pk = NULL;
-    ssh_pki_generate(SSH_KEYTYPE_ED25519, 0, &pk);
-    if(pk != NULL) {
-        ssh_bind_options_set(sshbind, SSH_BIND_OPTIONS_IMPORT_KEY, pk);
-    } else {
-        ESP_LOGE(TAG, "Failed to generate host key");
+    // 借鉴 example-master，利用 API Hack 将硬编码的主机密钥写入
+    if (import_embedded_host_key(sshbind, hardcoded_example_host_key) != SSH_OK) {
+        ESP_LOGE(TAG, "Failed to import embedded host key");
         goto end;
     }
 
@@ -271,7 +343,6 @@ static void ssh_server_listener_task(void *pvParameters)
     }
 
 end:
-    if (pk) ssh_key_free(pk);
     ssh_bind_free(sshbind);
     ssh_finalize();
     vTaskDelete(NULL);
