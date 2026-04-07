@@ -30,6 +30,9 @@ static const char *NVS_KEY_AUTOSTOP = "auto_stop_sec";
 
 static void update_led_by_flow(int duty);
 
+int web_server_get_motor_duty(void) { return current_motor_duty; }
+int web_server_get_auto_stop_sec(void) { return current_auto_stop_sec; }
+
 static void record_activity() {
     last_activity_tick = xTaskGetTickCount();
 }

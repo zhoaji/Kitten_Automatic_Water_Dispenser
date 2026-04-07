@@ -8,6 +8,7 @@
 #include "motor_mgr.h"
 #include "power_mgr.h"
 #include "power_mgr.h"
+#include "web_server.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -74,7 +75,21 @@ void cmd_handle(const char *cmd_line, cmd_write_fn_t write_fn, void *ctx)
         uint8_t r, g, b;
         led_mgr_get_color(&r, &g, &b);
         _printf_wrapper(write_fn, ctx, "LED颜色: R:%d G:%d B:%d\n", r, g, b);
-        _printf_wrapper(write_fn, ctx, "LED颜色: R:%d G:%d B:%d\n", r, g, b);
+        // 水流量与自动关闭设置
+        int duty = web_server_get_motor_duty();
+        int auto_stop = web_server_get_auto_stop_sec();
+        if (duty == 0) {
+            _printf_wrapper(write_fn, ctx, "水流量: 停止 (关闭)\n");
+        } else {
+            _printf_wrapper(write_fn, ctx, "水流量: %d%%\n", duty);
+        }
+        if (auto_stop == 0) {
+            _printf_wrapper(write_fn, ctx, "自动关闭: 未开启\n");
+        } else if (auto_stop < 60) {
+            _printf_wrapper(write_fn, ctx, "自动关闭: 无操作 %d 秒后将停止\n", auto_stop);
+        } else {
+            _printf_wrapper(write_fn, ctx, "自动关闭: 无操作 %d 分钟后将停止\n", auto_stop / 60);
+        }
     } else if (strcmp(argv[0], "led") == 0) {
         if (argc > 1) {
             if (strcmp(argv[1], "on") == 0) {
