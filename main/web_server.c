@@ -15,6 +15,7 @@
 #include "led_mgr.h"
 #include "motor_mgr.h"
 #include "power_mgr.h"
+#include "blynk_mqtt.h"
 
 static const char *TAG = "web_server";
 static httpd_handle_t http_server = NULL;
@@ -43,6 +44,7 @@ void web_server_set_motor_duty(int duty) {
     power_mgr_set_saved_duty(duty);
     update_led_by_flow(duty);
     record_activity(); // 重置自动关闭计时器
+    blynk_mqtt_report_int("flow", duty);
 }
 
 void web_server_set_auto_stop_sec(int sec) {
@@ -50,11 +52,13 @@ void web_server_set_auto_stop_sec(int sec) {
     current_auto_stop_sec = sec;
     save_auto_stop_cfg(sec);
     record_activity(); // 重置计时器起点
+    blynk_mqtt_report_int("autostop", sec);
 }
 
 void web_server_set_led_state(int state) {
     current_led_state = state;
     led_mgr_set_state(state);
+    blynk_mqtt_report_int("swich", state);
 }
 
 static void record_activity() {
@@ -96,6 +100,7 @@ static void auto_stop_task(void *pvParameters) {
                 motor_mgr_set_duty(0);
                 power_mgr_set_saved_duty(0);
                 update_led_by_flow(0);
+                blynk_mqtt_report_int("flow", 0);
             }
         }
         vTaskDelay(pdMS_TO_TICKS(1000));

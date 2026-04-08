@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_sleep.h"
 #include "esp_wifi.h"
+#include "blynk_mqtt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -42,7 +43,7 @@ void power_mgr_shutdown(void)
 
     // 4. 启用WiFi Modem Sleep以降低功耗（WiFi仍保持连接）
     esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
-
+    blynk_mqtt_report_int("power", 0);
     ESP_LOGI(TAG, "设备已进入低功耗休眠状态（WiFi保持连接，等待远程唤醒）");
 }
 
@@ -67,6 +68,7 @@ void power_mgr_wakeup(void)
 
     // 4. 恢复LED状态
     led_mgr_set_state(1);
+    blynk_mqtt_report_int("power", 1);
     ESP_LOGI(TAG, "LED已恢复");
 
     ESP_LOGI(TAG, "设备已唤醒，电机停止等待用户操作");

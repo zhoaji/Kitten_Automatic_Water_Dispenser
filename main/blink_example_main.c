@@ -11,6 +11,7 @@
 #include "motor_mgr.h"
 #include "power_mgr.h"
 #include "ssh_server.h"
+#include "blynk_mqtt.h"
 
 static const char *TAG = "main";
 
@@ -42,6 +43,7 @@ void app_main(void)
             // Start web server in STA mode
             start_web_server();
             ssh_server_init();
+            blynk_mqtt_start();
             
             // Keep app_main running
             while (1) {
