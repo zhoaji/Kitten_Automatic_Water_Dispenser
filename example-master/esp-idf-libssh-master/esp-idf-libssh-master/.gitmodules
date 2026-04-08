@@ -1,3 +1,0 @@
-[submodule "components/libssh/libssh"]
-	path = components/libssh/libssh
-	url = https://git.libssh.org/projects/libssh.git
