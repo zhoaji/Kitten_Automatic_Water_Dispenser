@@ -5,7 +5,7 @@
 /**
  * @brief 命令输出回调函数类型
  * @param str 输出的字符串
- * @param ctx 用户上下文（比如串口或者ssh通道的句柄）
+ * @param ctx 用户上下文（比如串口的句柄）
  */
 typedef void (*cmd_write_fn_t)(const char *str, void *ctx);
 

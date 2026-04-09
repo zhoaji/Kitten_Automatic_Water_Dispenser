@@ -1,18 +1,4 @@
 dependencies:
-  david-cermak/libssh:
-    component_hash: cdf89ed3ff997e433e08c1791f2f8a31ff975d84678456a4d033696764fec3a1
-    dependencies:
-    - name: espressif/sock_utils
-      registry_url: https://components.espressif.com
-      require: private
-      version: '*'
-    - name: idf
-      require: private
-      version: '>=5.2'
-    source:
-      registry_url: https://components.espressif.com/
-      type: service
-    version: 0.11.0~1
   espressif/led_strip:
     component_hash: 28c6509a727ef74925b372ed404772aeedf11cce10b78c3f69b3c66799095e2d
     dependencies:
@@ -23,23 +9,12 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 2.5.5
-  espressif/sock_utils:
-    component_hash: b2e5cafc60dfefd05720ababb9fca0dfe2830fb9d71f97e5336de36a84c591c9
-    dependencies:
-    - name: idf
-      require: private
-      version: '>=5.0'
-    source:
-      registry_url: https://components.espressif.com
-      type: service
-    version: 0.2.2
   idf:
     source:
       type: idf
     version: 5.2.6
 direct_dependencies:
-- david-cermak/libssh
 - espressif/led_strip
-manifest_hash: 6d23607c2af78a7360b0415e3d10b2654285d7628044d2e60aa6693ea53d7055
+manifest_hash: e75c2d945ba76d2a15684cef3d2394462d2a555ad0ea27481e56f163a8551ac7
 target: esp32s3
 version: 2.0.0

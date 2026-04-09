@@ -10,7 +10,7 @@
 #include "serial_cmd.h"
 #include "motor_mgr.h"
 #include "power_mgr.h"
-#include "ssh_server.h"
+
 #include "blynk_mqtt.h"
 
 static const char *TAG = "main";
@@ -42,7 +42,7 @@ void app_main(void)
         if (wifi_mgr_is_connected()) {
             // Start web server in STA mode
             start_web_server();
-            ssh_server_init();
+
             blynk_mqtt_start();
             
             // Keep app_main running
@@ -55,7 +55,7 @@ void app_main(void)
     // If no Wi-Fi config or connection failed, start AP mode
     wifi_mgr_start_ap();
     start_web_server();
-    ssh_server_init();
+
     
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(1000));
