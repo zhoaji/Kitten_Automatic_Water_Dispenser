@@ -97,13 +97,22 @@ void blynk_mqtt_start(void) {
 }
 
 void blynk_mqtt_report_int(const char* ds_name, int value) {
-    if (!client) return;
+    if (!client) {
+        ESP_LOGW(TAG, "Blynk MQTT client not initialized, skipping report: %s=%d", ds_name, value);
+        return;
+    }
     char topic[64];
     char data[16];
-    // 使用 ds/update/引脚名 主题上报数据
-    snprintf(topic, sizeof(topic), "ds/update/%s", ds_name);
+    // 使用 ds/引脚名 主题上报数据 (Blynk IoT MQTT 标准格式)
+    snprintf(topic, sizeof(topic), "ds/%s", ds_name);
     snprintf(data, sizeof(data), "%d", value);
-    esp_mqtt_client_publish(client, topic, data, 0, 1, 0);
+    
+    int msg_id = esp_mqtt_client_publish(client, topic, data, 0, 1, 0);
+    if (msg_id >= 0) {
+        ESP_LOGI(TAG, "Reporting -> Topic: %s, Data: %s (MsgID: %d)", topic, data, msg_id);
+    } else {
+        ESP_LOGE(TAG, "Failed to publish report to %s (Error code: %d)", topic, msg_id);
+    }
 }
 
 void blynk_mqtt_report_all(void) {
