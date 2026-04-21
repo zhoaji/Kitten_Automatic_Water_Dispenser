@@ -14,6 +14,7 @@ static volatile uint8_t led_r = 200;
 static volatile uint8_t led_g = 150;
 static volatile uint8_t led_b = 16;
 static volatile uint8_t led_on = 0;
+static volatile uint32_t blink_period = 0;
 
 static led_strip_handle_t led_strip = NULL;
 
@@ -40,15 +41,30 @@ static void configure_led(void)
 static void led_control_task(void *pvParameters)
 {
     configure_led();
+    uint8_t toggle = 0;
     
     while (1) {
         if (led_on) {
+            bool current_state = true;
+            if (blink_period > 0) {
+                current_state = (toggle == 0);
+                toggle = !toggle;
+            }
+
+            if (current_state) {
 #ifdef CONFIG_BLINK_LED_RMT
-            led_strip_set_pixel(led_strip, 0, led_r, led_g, led_b);
-            led_strip_refresh(led_strip);
+                led_strip_set_pixel(led_strip, 0, led_r, led_g, led_b);
+                led_strip_refresh(led_strip);
 #elif CONFIG_BLINK_LED_GPIO
-            gpio_set_level(BLINK_GPIO, 1);
+                gpio_set_level(BLINK_GPIO, 1);
 #endif
+            } else {
+#ifdef CONFIG_BLINK_LED_RMT
+                led_strip_clear(led_strip);
+#elif CONFIG_BLINK_LED_GPIO
+                gpio_set_level(BLINK_GPIO, 0);
+#endif
+            }
         } else {
 #ifdef CONFIG_BLINK_LED_RMT
             led_strip_clear(led_strip);
@@ -56,7 +72,12 @@ static void led_control_task(void *pvParameters)
             gpio_set_level(BLINK_GPIO, 0);
 #endif
         }
-        vTaskDelay(pdMS_TO_TICKS(50));
+        
+        if (blink_period > 0 && led_on) {
+            vTaskDelay(pdMS_TO_TICKS(blink_period / 2));
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(50));
+        }
     }
 }
 
@@ -79,7 +100,7 @@ void led_mgr_set_color(uint8_t r, uint8_t g, uint8_t b)
 
 void led_mgr_set_blink_period(uint32_t period)
 {
-    // 不再使用闪烁功能，保留接口兼容性
+    blink_period = period;
 }
 
 bool led_mgr_get_state(void)
@@ -96,5 +117,5 @@ void led_mgr_get_color(uint8_t *r, uint8_t *g, uint8_t *b)
 
 uint32_t led_mgr_get_blink_period(void)
 {
-    return 0;
+    return blink_period;
 }

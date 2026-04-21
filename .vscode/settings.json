@@ -3,7 +3,7 @@
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],
-  "idf.portWin": "COM4",
+  "idf.portWin": "COM6",
   "idf.currentSetup": "F:\\esp_enviromentV5.2.6\\.espressif\\v5.2.6\\esp-idf",
   "idf.customExtraVars": {
     "OPENOCD_SCRIPTS": "f:\\esp_enviromentV5.0\\tools\\openocd-esp32\\v0.12.0-esp32-20230419/openocd-esp32/share/openocd/scripts",

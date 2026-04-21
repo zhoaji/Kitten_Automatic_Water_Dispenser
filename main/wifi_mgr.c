@@ -250,8 +250,8 @@ void wifi_mgr_start_sta(void)
     if (!wifi_connected) {
         wifi_sta_cleanup();
         if (strlen(saved_ssid) > 0) {
-            ESP_LOGI(TAG, "清除保存的Wi-Fi配置");
-            wifi_mgr_clear_config();
+            ESP_LOGI(TAG, "Wi-Fi连接暂时失败，保留配置以备下次重启重试");
+            // wifi_mgr_clear_config(); // 不再自动删除配置
         }
     }
 }
